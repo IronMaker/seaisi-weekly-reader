@@ -2,6 +2,10 @@ name: SEAISI Cloud Acquisition Preview
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cloud_acquisition_preview.yml'
 
 permissions:
   contents: read
