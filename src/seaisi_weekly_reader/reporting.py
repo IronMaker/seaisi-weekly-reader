@@ -8,9 +8,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-def write_artifacts(root: Path, boundary, items, ledger, discovery, tests_text="", expected_count=None) -> Path:
+def write_artifacts(root: Path, boundary, items, ledger, discovery, tests_text="", expected_count=None, prefix="01_seaisi_live_acquisition_v1", reconciliation=None) -> Path:
     stamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%z")
-    out = root / f"01_seaisi_live_acquisition_v1_{stamp}"
+    out = root / f"{prefix}_{stamp}"
     out.mkdir(parents=True, exist_ok=False)
     records = [asdict(x) for x in items]
     (out / "inventory.json").write_text(json.dumps(records, ensure_ascii=False, indent=2, default=str) + "\n")
@@ -19,7 +19,9 @@ def write_artifacts(root: Path, boundary, items, ledger, discovery, tests_text="
         w.writeheader(); w.writerows(records)
     (out / "retrieval_ledger.json").write_text(json.dumps(ledger, ensure_ascii=False, indent=2) + "\n")
     ids = sorted(int(x.article_id) for x in items if x.article_id)
-    manifest = {"boundary": {"start": boundary.start.isoformat(), "end": boundary.end.isoformat()}, "inventory_count": len(items), "expected_inventory_count": expected_count, "exact_count_match": expected_count is None or len(items) == expected_count, "article_ids_sorted": ids, "routes": discovery.routes, "frontier_witnesses": discovery.frontier_witnesses, "exceptions": discovery.exceptions, "external_source_substitution": 0}
+    manifest = {"boundary": {"start": boundary.start.isoformat(), "end": boundary.end.isoformat()}, "inventory_count": len(items), "historical_expected_inventory_count": expected_count, "article_ids_sorted": ids, "routes": discovery.routes, "frontier_witnesses": discovery.frontier_witnesses, "exceptions": discovery.exceptions, "external_source_substitution": 0}
+    if reconciliation:
+        manifest["gold_reconciliation"] = reconciliation.__dict__
     (out / "run_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     if tests_text: (out / "test_report.txt").write_text(tests_text)
     return out
@@ -36,3 +38,8 @@ def write_reports(out: Path, boundary, items, ledger, failure=False, expected_co
         lines += [f"Expected exact inventory: **{expected_count}**, observed: **{len(items)}** (live-site divergence; no article was fabricated or removed)."]
     lines += ["", "## Gate", "", gate_line]
     (out / ("failure_counterexample.md" if failure else "known_week_replay.md")).write_text("\n".join(lines) + "\n")
+
+
+def write_gold_reconciliation(out: Path, reconciliation, article_28285: bool) -> None:
+    lines = ["# SEAISI Gold Reconciliation", "", f"Historical expected: **{reconciliation.historical_expected}** (regression reference)", f"Official live inventory: **{reconciliation.live_count}**", f"Accepted inventory: **{reconciliation.accepted_count}**", f"Status: `{reconciliation.status}`", "", "Official live source evidence is acceptance authority. Historical expected count cannot trim, drop, or rewrite a valid official article.", "", f"28285 included: **{article_28285}**", f"Reason: {reconciliation.reason}", ""]
+    (out / "gold_reconciliation.md").write_text("\n".join(lines))

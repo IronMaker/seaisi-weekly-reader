@@ -1,0 +1,15 @@
+{
+  "boundary": {
+    "start": "2026-08-12",
+    "end": "2026-08-18"
+  },
+  "historical_expected_count": 14,
+  "corrected_official_expected_count": 15,
+  "gold_correction": "GOLD_CORRECTION",
+  "official_added_article": {
+    "article_id": "28285",
+    "published_date": "2026-08-18",
+    "title": "TYASA’s new SBQ plant enters operation in Orizaba, Mexico",
+    "detail_url": "https://www.seaisi.org/details/28285?type=news-rooms"
+  }
+}

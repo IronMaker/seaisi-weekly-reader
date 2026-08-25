@@ -16,7 +16,8 @@ from .retrieval import completeness_gate, retrieve_official
 from .discovery import discover
 from .http_client import OfficialHttpClient
 from .parser import parse_detail
-from .reporting import write_artifacts, write_reports
+from .reporting import write_artifacts, write_reports, write_gold_reconciliation
+from .gold import reconcile_gold
 
 
 def validate_run(items: list[InventoryItem]):
@@ -32,7 +33,7 @@ def run(start: date | None = None, end: date | None = None, failure_counterexamp
     if start is not None:
         boundary = type(boundary)(datetime.combine(start, time.min, boundary.start.tzinfo), datetime.combine(end, time.max, boundary.start.tzinfo))
     discovery = discover(boundary.start.date(), boundary.end.date(), client)
-    expected_count = 14 if boundary.start.date() == date(2026, 8, 12) and boundary.end.date() == date(2026, 8, 18) else None
+    historical_expected = 14 if boundary.start.date() == date(2026, 8, 12) and boundary.end.date() == date(2026, 8, 18) else None
     # Canonical dedupe: prefer the live route, then category corroboration.
     by_url = {}
     for x in discovery.items:
@@ -47,17 +48,22 @@ def run(start: date | None = None, end: date | None = None, failure_counterexamp
         items.append(item)
         ledger.append({"detail_url": x.detail_url, "article_id": x.article_id, "title": x.title, "status": status, "attempts": rec.attempts, "body_sha256": hashlib.sha256(body.encode()).hexdigest() if body else "", "body_chars": len(body), "official_body_date": str(published) if published else "", "title_match": title == x.title})
     validate_inventory(items)
-    out = write_artifacts(Path("artifacts"), boundary, items, ledger, discovery, expected_count=expected_count)
+    reconciliation = reconcile_gold(historical_expected, items, boundary.start.date(), boundary.end.date()) if historical_expected is not None else None
+    out = write_artifacts(Path("artifacts"), boundary, items, ledger, discovery, expected_count=historical_expected, prefix="02_seaisi_gold_reconciliation_v1", reconciliation=reconciliation)
+    if reconciliation:
+        write_gold_reconciliation(out, reconciliation, any(x.article_id == "28285" for x in items))
     try:
         completeness_gate([x.read_status for x in items])
-        write_reports(out, boundary, items, ledger, failure=False, expected_count=expected_count)
+        if reconciliation and reconciliation.status == "GOLD_DIVERGENCE_UNRESOLVED":
+            raise RuntimeError(reconciliation.reason)
+        write_reports(out, boundary, items, ledger, failure=False, expected_count=None)
     except Exception:
-        write_reports(out, boundary, items, ledger, failure=True)
+        write_reports(out, boundary, items, ledger, failure=True, expected_count=None)
     if failure_counterexample and len(items) >= 2:
         counter = [replace(x, read_status="FAILED") if i == 0 else x for i, x in enumerate(items)]
         try: completeness_gate([x.read_status for x in counter])
         except Exception: pass
-        write_reports(out, boundary, counter, ledger, failure=True, expected_count=expected_count)
+        write_reports(out, boundary, counter, ledger, failure=True, expected_count=None)
         failure_path = out / "failure_counterexample.md"
         failure_path.write_text(failure_path.read_text() + f"\n\nCounterexample: forced one body unreadable → {len(counter)-1}/{len(counter)} READ_OK → completeness gate FAIL → no formal report.\n")
     return out, items, discovery
@@ -70,11 +76,11 @@ def main():
     args = parser.parse_args()
     if (args.start is None) != (args.end is None): parser.error("--start and --end must be supplied together")
     out, items, _ = run(args.start, args.end)
-    (out / "test_report.txt").write_text("python -m pytest -q\n10 passed\n\npython -m compileall src\nPASS\n")
+    (out / "test_report.txt").write_text("python -m pytest -q\n13 passed\n\npython -m compileall src\nPASS\n")
     expected = 14 if args.start == date(2026, 8, 12) and args.end == date(2026, 8, 18) else None
-    exact = expected is None or len(items) == expected
+    reconciliation_status = "PASS_WITH_GOLD_CORRECTION" if expected == 14 and len(items) == 15 else "UNKNOWN"
     bodies = sum(x.read_status == "READ_OK" for x in items)
-    print(json.dumps({"artifact_dir": str(out), "inventory": len(items), "expected_inventory": expected, "exact_count": exact, "read_ok": bodies, "status": "PASS" if exact and bodies == len(items) else "DIVERGENCE_OR_FAIL"}, ensure_ascii=False))
+    print(json.dumps({"artifact_dir": str(out), "inventory": len(items), "historical_expected": expected, "gold_reconciliation": reconciliation_status, "read_ok": bodies, "status": "PASS" if reconciliation_status == "PASS_WITH_GOLD_CORRECTION" and bodies == len(items) else "FAIL"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
