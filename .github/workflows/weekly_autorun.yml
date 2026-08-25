@@ -183,4 +183,4 @@ jobs:
             echo '- Email: sent only when SEAISI_SMTP_* and SEAISI_EMAIL_TO secrets are configured.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-# Full convergence validation trigger: 2026-08-25 17:17 Asia/Taipei
+# Fresh full-run trigger: 2026-08-25 17:19 Asia/Taipei
