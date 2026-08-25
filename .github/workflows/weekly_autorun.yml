@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: seaisi-weekly-cloud-autorun
@@ -18,6 +20,9 @@ concurrency:
 
 jobs:
   weekly:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -63,14 +68,11 @@ jobs:
           set -euo pipefail
           python -m seaisi_weekly_reader.cloud_publish "${{ steps.acquisition.outputs.artifact_dir }}" | tee publish_stdout.json
           python - <<'PY'
-          import json
-          import os
+          import json, os
           from pathlib import Path
           line = Path('publish_stdout.json').read_text(encoding='utf-8').strip().splitlines()[-1]
           p = json.loads(line)
-          for k in ('start','end','status','published'):
-              print(f'{k}={p[k]}')
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+          with open(Path(os.environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as f:
               for k in ('start','end','status','published'):
                   f.write(f'{k}={p[k]}\n')
           PY
@@ -96,6 +98,18 @@ jobs:
             echo 'No publication changes to commit.'
           fi
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
       - name: Optional email delivery
         env:
           SMTP_HOST: ${{ secrets.SEAISI_SMTP_HOST }}
@@ -106,6 +120,7 @@ jobs:
           START_DATE: ${{ steps.publish.outputs.start }}
           END_DATE: ${{ steps.publish.outputs.end }}
           PUB_STATUS: ${{ steps.publish.outputs.status }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           python - <<'PY'
           import os, smtplib
@@ -123,7 +138,7 @@ jobs:
               f"SEAISI Weekly Cloud Autorun completed.\n"
               f"Status: {os.environ['PUB_STATUS']}\n"
               f"Period: {os.environ['START_DATE']}–{os.environ['END_DATE']}\n"
-              f"Web: https://ironmaker.github.io/seaisi-weekly-reader/latest.html\n"
+              f"Web: {os.environ.get('PAGE_URL','')}latest.html\n"
           )
           with smtplib.SMTP(os.environ['SMTP_HOST'], port, timeout=30) as s:
               s.starttls()
@@ -141,7 +156,7 @@ jobs:
             echo '- Schedule: Wednesday 09:00 Asia/Taipei (01:00 UTC)'
             echo '- Period: `${{ steps.publish.outputs.start }} → ${{ steps.publish.outputs.end }}`'
             echo '- Publication status: `${{ steps.publish.outputs.status }}`'
-            echo '- Pages: https://ironmaker.github.io/seaisi-weekly-reader/'
-            echo '- Latest: https://ironmaker.github.io/seaisi-weekly-reader/latest.html'
+            echo '- Pages: ${{ steps.deployment.outputs.page_url }}'
+            echo '- Latest: ${{ steps.deployment.outputs.page_url }}latest.html'
             echo '- Email: sent only when SEAISI_SMTP_* and SEAISI_EMAIL_TO secrets are configured.'
           } >> "$GITHUB_STEP_SUMMARY"
