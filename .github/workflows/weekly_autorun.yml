@@ -160,3 +160,5 @@ jobs:
             echo '- Latest: ${{ steps.deployment.outputs.page_url }}latest.html'
             echo '- Email: sent only when SEAISI_SMTP_* and SEAISI_EMAIL_TO secrets are configured.'
           } >> "$GITHUB_STEP_SUMMARY"
+
+# Manual validation trigger: 2026-08-25 Asia/Taipei
