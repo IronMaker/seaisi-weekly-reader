@@ -41,16 +41,12 @@ jobs:
           for f in docs/SEAISI_Weekly_*Profile*.md; do
             [ -e "$f" ] || continue
             base=$(basename "$f")
-            if [ "$base" = "$active_a" ] || [ "$base" = "$active_b" ]; then
-              continue
-            fi
+            if [ "$base" = "$active_a" ] || [ "$base" = "$active_b" ]; then continue; fi
             mv "$f" "docs/archive/$base"
             echo "ARCHIVED: $base"
             moved=1
           done
-          if [ "$moved" -eq 0 ]; then
-            echo 'ARCHIVE_NOOP: no superseded top-level profile docs found.'
-          fi
+          [ "$moved" -eq 1 ] || echo 'ARCHIVE_NOOP: no superseded top-level profile docs found.'
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -75,8 +71,7 @@ jobs:
           ARTIFACT_DIR=$(python - <<'PY'
           import json
           from pathlib import Path
-          line = Path('weekly_stdout.json').read_text(encoding='utf-8').strip().splitlines()[-1]
-          payload = json.loads(line)
+          payload=json.loads(Path('weekly_stdout.json').read_text(encoding='utf-8').strip().splitlines()[-1])
           print(payload['artifact_dir'])
           PY
           )
@@ -91,11 +86,9 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
-          line = Path('publish_stdout.json').read_text(encoding='utf-8').strip().splitlines()[-1]
-          p = json.loads(line)
+          p=json.loads(Path('publish_stdout.json').read_text(encoding='utf-8').strip().splitlines()[-1])
           with open(Path(os.environ['GITHUB_OUTPUT']), 'a', encoding='utf-8') as f:
-              for k in ('start','end','status','published'):
-                  f.write(f'{k}={p[k]}\n')
+              for k in ('start','end','status','published'): f.write(f'{k}={p[k]}\n')
           PY
 
       - name: Upload audit evidence
@@ -131,7 +124,8 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Optional email delivery
+      - name: Email submission
+        id: email
         env:
           SMTP_HOST: ${{ secrets.SEAISI_SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SEAISI_SMTP_PORT }}
@@ -143,18 +137,24 @@ jobs:
           PUB_STATUS: ${{ steps.publish.outputs.status }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
+          set -euo pipefail
           python - <<'PY'
           import os, smtplib
           from email.message import EmailMessage
-          required = ['SMTP_HOST','SMTP_USER','SMTP_PASSWORD','EMAIL_TO']
+          from pathlib import Path
+          out=Path(os.environ['GITHUB_OUTPUT'])
+          required=['SMTP_HOST','SMTP_USER','SMTP_PASSWORD','EMAIL_TO']
           if any(not os.getenv(x) for x in required):
-              print('EMAIL_SKIPPED: GitHub email secrets are not configured.')
+              with out.open('a') as f:
+                  f.write('submission_status=NOT_CONFIGURED\n')
+                  f.write('delivery_status=NOT_ATTEMPTED\n')
+              print('EMAIL_NOT_CONFIGURED: no SMTP submission attempted.')
               raise SystemExit(0)
-          port = int(os.getenv('SMTP_PORT') or '587')
-          msg = EmailMessage()
-          msg['Subject'] = f"SEAISI 週報｜{os.environ['START_DATE']}–{os.environ['END_DATE']}"
-          msg['From'] = os.environ['SMTP_USER']
-          msg['To'] = os.environ['EMAIL_TO']
+          port=int(os.getenv('SMTP_PORT') or '587')
+          msg=EmailMessage()
+          msg['Subject']=f"SEAISI 週報｜{os.environ['START_DATE']}–{os.environ['END_DATE']}"
+          msg['From']=os.environ['SMTP_USER']
+          msg['To']=os.environ['EMAIL_TO']
           msg.set_content(
               f"SEAISI Weekly Cloud Autorun completed.\n"
               f"Status: {os.environ['PUB_STATUS']}\n"
@@ -162,10 +162,11 @@ jobs:
               f"Web: {os.environ.get('PAGE_URL','')}latest.html\n"
           )
           with smtplib.SMTP(os.environ['SMTP_HOST'], port, timeout=30) as s:
-              s.starttls()
-              s.login(os.environ['SMTP_USER'], os.environ['SMTP_PASSWORD'])
-              s.send_message(msg)
-          print('EMAIL_SENT')
+              s.starttls(); s.login(os.environ['SMTP_USER'], os.environ['SMTP_PASSWORD']); s.send_message(msg)
+          with out.open('a') as f:
+              f.write('submission_status=SUBMITTED\n')
+              f.write('delivery_status=UNVERIFIED\n')
+          print('EMAIL_SUBMITTED: SMTP accepted the outbound message; recipient delivery remains UNVERIFIED.')
           PY
 
       - name: Summary
@@ -180,7 +181,9 @@ jobs:
             echo '- Pages: ${{ steps.deployment.outputs.page_url }}'
             echo '- Latest: ${{ steps.deployment.outputs.page_url }}latest.html'
             echo '- Docs archive: superseded top-level profile docs move to `docs/archive/` automatically.'
-            echo '- Email: sent only when SEAISI_SMTP_* and SEAISI_EMAIL_TO secrets are configured.'
+            echo '- Email submission: `${{ steps.email.outputs.submission_status || 'UNKNOWN' }}`'
+            echo '- Recipient delivery: `${{ steps.email.outputs.delivery_status || 'UNKNOWN' }}`'
+            echo '- Rule: SMTP/Gmail SENT is submission evidence only; it MUST NOT be reported as recipient-delivery PASS.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-# Fresh full-run trigger: 2026-08-25 17:19 Asia/Taipei
+# Delivery semantics hardened 2026-08-25 Asia/Taipei
