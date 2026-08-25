@@ -30,6 +30,9 @@ def publish(artifact_dir: Path, repo_root: Path) -> dict:
     end = manifest["boundary"]["end"][:10]
     read_ok = sum(1 for x in inventory if x.get("read_status") == "READ_OK")
     complete = bool(inventory) and read_ok == len(inventory)
+    producer_status = manifest.get("producer_status", "FAIL")
+    producer_reason = manifest.get("producer_reason", "missing producer authority")
+    producer_pass = producer_status == "PASS"
 
     reports_dir = repo_root / "reports"
     canonical_md = reports_dir / f"SEAISI_Weekly_{start}_{end}.md"
@@ -37,7 +40,7 @@ def publish(artifact_dir: Path, repo_root: Path) -> dict:
     docs_runs.mkdir(parents=True, exist_ok=True)
     target = docs_runs / f"{start}_{end}.html"
 
-    if complete and canonical_md.exists():
+    if producer_pass and complete and canonical_md.exists():
         md_text = canonical_md.read_text(encoding="utf-8")
         body = markdown.markdown(md_text, extensions=["tables", "fenced_code"])
         status = "FORMAL_REPORT_PUBLISHED"
@@ -47,7 +50,10 @@ def publish(artifact_dir: Path, repo_root: Path) -> dict:
             f"<tr><td>{html.escape(str(x.get('published_date','')))}</td><td>{html.escape(x.get('title',''))}</td><td><a href=\"{html.escape(x.get('detail_url',''))}\">official</a></td><td>{html.escape(x.get('read_status',''))}</td></tr>"
             for x in inventory
         )
-        if complete:
+        if not producer_pass:
+            status = "FAILED_EXECUTION_REPORT"
+            note = f"Producer authority did not pass; formal weekly report is withheld. Reason: {producer_reason}"
+        elif complete:
             status = "ACQUISITION_COMPLETE_EDITORIAL_PENDING"
             note = "官方正文已全部取得，但此週期尚無經核准的繁中正式稿；因此不冒充正式週報。"
         else:
@@ -58,7 +64,7 @@ def publish(artifact_dir: Path, repo_root: Path) -> dict:
 <h1>{html.escape(title)}</h1>
 <p class=\"status\">{status}</p>
 <p>{html.escape(note)}</p>
-<p class=\"meta\">Inventory: {len(inventory)} ｜ READ_OK: {read_ok}/{len(inventory)} ｜ External substitution: 0</p>
+<p class=\"meta\">Producer: {html.escape(producer_status)} ｜ Inventory: {len(inventory)} ｜ READ_OK: {read_ok}/{len(inventory)} ｜ External substitution: 0</p>
 <table><thead><tr><th>Date</th><th>Title</th><th>Source</th><th>Status</th></tr></thead><tbody>{rows}</tbody></table>
 """
 
@@ -73,7 +79,7 @@ def publish(artifact_dir: Path, repo_root: Path) -> dict:
 <ul><li><a href=\"runs/{start}_{end}.html\">{start} ～ {end}</a></li></ul>
 </body></html>"""
     (repo_root / "docs" / "index.html").write_text(index, encoding="utf-8")
-    result = {"start": start, "end": end, "status": status, "inventory": len(inventory), "read_ok": read_ok, "published": str(target)}
+    result = {"start": start, "end": end, "status": status, "producer_status": producer_status, "inventory": len(inventory), "read_ok": read_ok, "published": str(target)}
     print(json.dumps(result, ensure_ascii=False))
     return result
 
