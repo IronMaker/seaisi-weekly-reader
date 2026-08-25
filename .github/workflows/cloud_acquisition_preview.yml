@@ -1,0 +1,91 @@
+name: SEAISI Cloud Acquisition Preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquisition-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Compile
+        run: python -m compileall src
+
+      - name: Run known-week cloud acquisition
+        id: acquisition
+        run: |
+          set -euo pipefail
+          python -m seaisi_weekly_reader.workflow \
+            --start 2026-08-12 \
+            --end 2026-08-18 | tee cloud_acquisition_stdout.json
+
+          ARTIFACT_DIR=$(python - <<'PY'
+          import json
+          from pathlib import Path
+          text = Path('cloud_acquisition_stdout.json').read_text(encoding='utf-8').strip().splitlines()[-1]
+          payload = json.loads(text)
+          print(payload['artifact_dir'])
+          PY
+          )
+
+          test -d "$ARTIFACT_DIR"
+          echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
+
+          cp cloud_acquisition_stdout.json "$ARTIFACT_DIR/cloud_acquisition_stdout.json"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path('cloud_acquisition_stdout.json').read_text(encoding='utf-8').strip().splitlines()[-1])
+          assert payload['inventory'] == 15, payload
+          assert payload['read_ok'] == 15, payload
+          assert payload['status'] == 'PASS', payload
+          print('Cloud acquisition acceptance: 15/15 PASS')
+          PY
+
+      - name: Upload acquisition artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: seaisi-cloud-acquisition-preview-2026-08-12_2026-08-18
+          path: ${{ steps.acquisition.outputs.artifact_dir }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo '## SEAISI Cloud Acquisition Preview'
+            echo ''
+            echo '- Boundary: 2026-08-12 to 2026-08-18'
+            echo '- Expected corrected inventory: 15'
+            echo '- Source authority: SEAISI official only'
+            echo '- Artifact name: `seaisi-cloud-acquisition-preview-2026-08-12_2026-08-18`'
+            echo ''
+            if [ -f cloud_acquisition_stdout.json ]; then
+              echo '### Workflow output'
+              echo '```json'
+              tail -n 1 cloud_acquisition_stdout.json
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
