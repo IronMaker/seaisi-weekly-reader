@@ -4,6 +4,7 @@ from seaisi_weekly_reader.parser import canonical_url, parse_listing, parse_deta
 from seaisi_weekly_reader.retrieval import completeness_gate, retrieve_official, RetrievalIncomplete
 from seaisi_weekly_reader.gold import reconcile_gold
 from seaisi_weekly_reader.inventory import InventoryItem
+from seaisi_weekly_reader.cloud_publish import publish
 import json
 from pathlib import Path
 
@@ -69,3 +70,34 @@ def test_invalid_extra_article_is_not_silently_accepted():
 def test_missing_live_article_is_unresolved():
     result = reconcile_gold(15, _items(14), date(2026, 8, 12), date(2026, 8, 18))
     assert result.status == "GOLD_DIVERGENCE_UNRESOLVED"
+
+
+def _publication_fixture(tmp_path: Path, producer_status: str):
+    artifact = tmp_path / "artifact"
+    artifact.mkdir()
+    manifest = {
+        "boundary": {"start": "2026-08-12T00:00:00+08:00", "end": "2026-08-18T23:59:59+08:00"},
+        "producer_status": producer_status,
+        "producer_reason": "test authority",
+    }
+    inventory = [{"published_date": "2026-08-12", "title": "A", "detail_url": "https://www.seaisi.org/details/1?type=news-rooms", "read_status": "READ_OK"}]
+    (artifact / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (artifact / "inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "reports" / "SEAISI_Weekly_2026-08-12_2026-08-18.md").write_text("# Approved formal report", encoding="utf-8")
+    return artifact
+
+
+def test_publication_cannot_override_failed_producer_even_when_all_bodies_read_and_formal_md_exists(tmp_path):
+    artifact = _publication_fixture(tmp_path, "FAIL")
+    result = publish(artifact, tmp_path)
+    assert result["status"] == "FAILED_EXECUTION_REPORT"
+    assert "Approved formal report" not in (tmp_path / "docs" / "latest.html").read_text(encoding="utf-8")
+
+
+def test_publication_allows_formal_report_only_with_producer_pass(tmp_path):
+    artifact = _publication_fixture(tmp_path, "PASS")
+    result = publish(artifact, tmp_path)
+    assert result["status"] == "FORMAL_REPORT_PUBLISHED"
+    assert "Approved formal report" in (tmp_path / "docs" / "latest.html").read_text(encoding="utf-8")
