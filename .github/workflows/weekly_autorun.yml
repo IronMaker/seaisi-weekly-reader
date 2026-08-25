@@ -186,4 +186,4 @@ jobs:
             echo '- Rule: SMTP/Gmail SENT is submission evidence only; it MUST NOT be reported as recipient-delivery PASS.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-# Automation trigger: 2026-08-26 03:01 Asia/Taipei; required boundary 2026-08-19..2026-08-25
+# Editorial publication trigger: 2026-08-26 03:06 Asia/Taipei; boundary 2026-08-19..2026-08-25
